@@ -1,4 +1,4 @@
-import { ai, AI_MODEL } from "@/lib/ai";
+import { aiText } from "@/lib/ai";
 import type { FieldDetection } from "./detectField";
 import { COUNTRY_RULES, COUNTRY_LABELS } from "@/data/countryRules";
 
@@ -6,7 +6,9 @@ export async function rewriteCV(
   cvText: string,
   jobDescription: string,
   country: string,
-  field: FieldDetection
+  field: FieldDetection,
+  // Terms the job wants but the CV lacks — verified absent from the output.
+  forbidden: string[] = []
 ): Promise<string> {
   const countryRule = COUNTRY_RULES[country] ?? COUNTRY_RULES.US;
   const countryName = COUNTRY_LABELS[country] ?? country;
@@ -31,13 +33,5 @@ export async function rewriteCV(
     `ORIGINAL CV:\n"""\n${cvText}\n"""`,
   ].join("\n\n");
 
-  const res = await ai.chat.completions.create({
-    model: AI_MODEL,
-    messages: [
-      { role: "system", content: system },
-      { role: "user", content: user },
-    ],
-  });
-
-  return res.choices[0]?.message?.content ?? "";
+  return aiText(system, user, { forbidden });
 }
