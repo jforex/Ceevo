@@ -15,7 +15,7 @@ function requirements(resourceUrl: string) {
     asset: ASSET,
     payTo: PAY_TO,
     maxTimeoutSeconds: 60,
-    extra: { name: "USDC", version: "2" },
+    extra: { name: "USD₮0", version: "1" },
     resource: resourceUrl,
   };
 }
