@@ -1,3 +1,4 @@
+import { requirePayment } from "@/lib/paywall";
 import { NextRequest, NextResponse } from "next/server";
 import { parseCV } from "@/lib/parseCV";
 import { detectField } from "@/agent/detectField";
@@ -10,6 +11,8 @@ export const maxDuration = 60; // this route runs several AI calls
 
 export async function POST(req: NextRequest) {
   try {
+    const gate = await requirePayment(req);
+    if (gate) return gate;
     const form = await req.formData();
     const file = form.get("cv") as File | null;
     const jobTitle = (form.get("jobTitle") as string) ?? "";

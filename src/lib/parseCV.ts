@@ -10,7 +10,8 @@ export async function parseCV(
 
   if (lower.endsWith(".pdf")) {
     // pdf-parse is CommonJS; import inside the function to avoid bundling issues.
-    const pdfParse = (await import("pdf-parse")).default;
+   const mod = await import("pdf-parse");
+   const pdfParse = ((mod as unknown as { default?: unknown }).default ?? mod) as (b: Buffer) => Promise<{ text: string }>;   
     const data = await pdfParse(buffer);
     return clean(data.text);
   }
