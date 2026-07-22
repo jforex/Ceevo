@@ -1,0 +1,12 @@
+John Adeyemi
+Frontend Developer
+
+EXPERIENCE
+Built React dashboards with TypeScript and Tailwind for 5000 users at TechCorp (2022-present).
+Fixed bugs and wrote tests at StartupXYZ (2020-2022).
+
+SKILLS
+JavaScript, React, HTML, CSS
+
+EDUCATION
+BSc Computer Science, University of Lagos, 2020

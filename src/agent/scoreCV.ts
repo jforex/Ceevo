@@ -24,6 +24,7 @@ const schema = {
 
 export async function scoreCV(
   cvText: string,
+  jobTitle: string,
   jobDescription: string,
   field: FieldDetection
 ): Promise<CVScore> {
@@ -38,7 +39,8 @@ export async function scoreCV(
     "Return JSON only.",
   ].join(" ");
 
-  const user = [
+const user = [
+    `JOB TITLE: ${jobTitle || "(not specified)"}`,
     `JOB DESCRIPTION:\n"""\n${jobDescription}\n"""`,
     `CV:\n"""\n${cvText}\n"""`,
   ].join("\n\n");
