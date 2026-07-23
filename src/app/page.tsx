@@ -44,7 +44,7 @@ export default function Landing() {
             }}
           >
             <span style={{ width: 7, height: 7, borderRadius: 999, background: "var(--lime)", display: "inline-block" }} />
-            Built on X Layer · pay-per-review with USDC
+            Built on X Layer · pay-per-review with USDT
           </div>
           <h1
             style={{
@@ -55,11 +55,11 @@ export default function Landing() {
             Your CV,
             <br />
             <span style={{ color: "var(--blue)" }}>graded</span> and{" "}
-            <span style={{ color: "var(--lime)" }}>verified</span>.
+            <span style={{ color: "var(--lime)" }}>rewritten</span>.
           </h1>
           <p style={{ color: "var(--muted)", fontSize: 19, lineHeight: 1.5, maxWidth: 520, marginTop: 22 }}>
-            Ceevo reads your CV, scores it against the exact job, rewrites it to the target
-            country&apos;s hiring norms, and mints a verifiable on-chain credential.
+            Ceevo reads your CV, scores it against the exact job, and rewrites it to the target
+            country&apos;s hiring norms — never inventing skills you don&apos;t have.
           </p>
           <div style={{ display: "flex", gap: 12, marginTop: 32, flexWrap: "wrap" }}>
             <Link
@@ -115,7 +115,7 @@ export default function Landing() {
             ["01", "Read", "We parse your PDF or DOCX and detect your field, seniority, and target role — automatically."],
             ["02", "Score", "An ATS-style match score against the exact job, with matched and missing keywords and concrete fixes."],
             ["03", "Rewrite", "A truthful rewrite tuned to the target country's hiring norms — never inventing skills you don't have."],
-            ["04", "Verify", "Mint a soulbound on-chain credential on X Layer proving your CV was reviewed."],
+            ["04", "Apply", "A matching cover letter and personalized job leads with ready-to-paste search queries."],
           ].map(([n, t, d]) => (
             <div key={n} style={card}>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--blue)", marginBottom: 12 }}>{n}</div>
@@ -141,12 +141,12 @@ export default function Landing() {
             <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
               Full unlock
             </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--blue)", marginBottom: 20 }}>pay-per-use · USDC on X Layer</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--blue)", marginBottom: 20 }}>$0.03 per review · USDT on X Layer</div>
             {[
               "Everything in free",
               "Full country-tailored rewrite",
               "Personalized job leads + where to apply",
-              "Soulbound on-chain credential",
+              "Truthful cover letter",
             ].map((f) => (
               <div key={f} style={featRow}><span style={{ color: "var(--blue)" }}>✓</span> {f}</div>
             ))}
@@ -169,7 +169,7 @@ export default function Landing() {
       {/* FOOTER */}
       <footer style={{ borderTop: "1px solid var(--line)", padding: "28px 20px", textAlign: "center" }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--muted)" }}>
-          Ceevo · on-chain CV verification on X Layer
+          Ceevo · pay-per-review CV agent on X Layer
         </span>
       </footer>
 
