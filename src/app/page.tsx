@@ -141,7 +141,7 @@ export default function Landing() {
             <div style={{ fontFamily: "var(--font-display)", fontSize: 22, fontWeight: 700, marginBottom: 4 }}>
               Full unlock
             </div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--blue)", marginBottom: 20 }}>$0.03 per review · USDT on X Layer</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--blue)", marginBottom: 20 }}>$0.01 per review · USDT on X Layer</div>
             {[
               "Everything in free",
               "Full country-tailored rewrite",

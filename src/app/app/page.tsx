@@ -26,7 +26,7 @@ type FullResult = BasicResult & {
   partial?: { rewritten: boolean; letter: boolean; jobs: boolean };
 };
 
-// Max the client will auto-pay, in base units. Endpoint charges 30000 (0.03 USDT).
+// Max the client will auto-pay, in base units. Endpoint charges 10000 (0.01 USDT).
 const MAX_PAYMENT = BigInt(100000);
 
 declare global {
@@ -183,7 +183,7 @@ export default function App() {
       </h1>
       <p style={{ color: "var(--muted)", fontSize: 16, lineHeight: 1.5, margin: "0 0 34px" }}>
         Score, change plan, country-tailored rewrite, cover letter, and job leads — one payment of{" "}
-        <span style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>0.03 USDT</span> on {activeChain.name}.
+        <span style={{ color: "var(--text)", fontFamily: "var(--font-mono)" }}>0.01 USDT</span> on {activeChain.name}.
       </p>
 
       {/* FORM */}
@@ -248,7 +248,7 @@ export default function App() {
           disabled={!!busy}
           style={{ ...secondaryBtn, opacity: busy ? 0.6 : 1 }}
         >
-          {busy === "review" ? "Paying & reviewing — this takes a moment…" : "Pay 0.03 USDT & run full review →"}
+          {busy === "review" ? "Paying & reviewing — this takes a moment…" : "Pay 0.01 USDT & run full review →"}
         </button>
 
         {!address && (
@@ -297,10 +297,10 @@ export default function App() {
               </div>
               <p style={{ color: "var(--muted)", fontSize: 14.5, lineHeight: 1.55, margin: "0 0 18px" }}>
                 Get a change plan, a country-tailored rewrite, a matching cover letter, and
-                personalized job leads — one payment of 0.03 USDT.
+                personalized job leads — one payment of 0.01 USDT.
               </p>
               <button onClick={runFullReview} disabled={!!busy} style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }}>
-                {busy === "review" ? "Paying & reviewing…" : "Pay 0.03 USDT & unlock →"}
+                {busy === "review" ? "Paying & reviewing…" : "Pay 0.01 USDT & unlock →"}
               </button>
             </section>
           )}
