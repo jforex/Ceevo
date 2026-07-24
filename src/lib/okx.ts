@@ -1,43 +1,37 @@
-import crypto from "crypto";
+// OKX x402 facilitator access via the official SDK (@okxweb3/x402-core).
+//
+// We previously hand-rolled the /verify and /settle HTTP calls (manual HMAC signing,
+// hand-built request bodies). That is exactly the layer the reference SDK owns, and a
+// subtle divergence there made valid signed payments fail verify and re-issue 402.
+// Using OKXFacilitatorClient makes request construction, auth signing, and the
+// verify/settle contract match the Broker's expectations by construction.
+import { OKXFacilitatorClient } from "@okxweb3/x402-core";
 
-const BASE = process.env.OKX_PAYMENT_BASE_URL ?? "https://web3.okx.com";
-const KEY = process.env.OKX_API_KEY ?? "";
-const SECRET = process.env.OKX_API_SECRET ?? "";
-const PASSPHRASE = process.env.OKX_API_PASSPHRASE ?? "";
+// syncSettle:true → settle waits for on-chain confirmation before returning, so we only
+// deliver the paid content once payment is actually settled.
+const client = new OKXFacilitatorClient({
+  apiKey: process.env.OKX_API_KEY ?? "",
+  secretKey: process.env.OKX_API_SECRET ?? "",
+  passphrase: process.env.OKX_API_PASSPHRASE ?? "",
+  baseUrl: process.env.OKX_PAYMENT_BASE_URL || undefined,
+  syncSettle: true,
+});
 
-function sign(timestamp: string, method: string, path: string, body: string) {
-  const prehash = timestamp + method + path + body;
-  return crypto.createHmac("sha256", SECRET).update(prehash).digest("base64");
+export type FacilitatorPayload = Parameters<OKXFacilitatorClient["verify"]>[0];
+export type FacilitatorRequirements = Parameters<OKXFacilitatorClient["verify"]>[1];
+
+export function okxVerify(payload: FacilitatorPayload, requirements: FacilitatorRequirements) {
+  return client.verify(payload, requirements);
 }
 
-async function okxRequest(method: "GET" | "POST", path: string, body?: unknown) {
-  const timestamp = new Date().toISOString();
-  const bodyStr = body ? JSON.stringify(body) : "";
-  const signature = sign(timestamp, method, path, bodyStr);
-
-  const res = await fetch(BASE + path, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "OK-ACCESS-KEY": KEY,
-      "OK-ACCESS-SIGN": signature,
-      "OK-ACCESS-PASSPHRASE": PASSPHRASE,
-      "OK-ACCESS-TIMESTAMP": timestamp,
-    },
-    body: method === "POST" ? bodyStr : undefined,
-  });
-
-  return res.json();
-}
-
-export function okxVerify(payload: unknown) {
-  return okxRequest("POST", "/api/v6/pay/x402/verify", payload);
-}
-
-export function okxSettle(payload: unknown) {
-  return okxRequest("POST", "/api/v6/pay/x402/settle", payload);
+export function okxSettle(payload: FacilitatorPayload, requirements: FacilitatorRequirements) {
+  return client.settle(payload, requirements);
 }
 
 export function okxSupported() {
-  return okxRequest("GET", "/api/v6/pay/x402/supported");
+  return client.getSupported();
+}
+
+export function okxSettleStatus(txHash: string) {
+  return client.getSettleStatus(txHash);
 }

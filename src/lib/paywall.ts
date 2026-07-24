@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { okxVerify, okxSettle } from "./okx";
+import { okxVerify, okxSettle, type FacilitatorPayload, type FacilitatorRequirements } from "./okx";
 
 const NETWORK = process.env.PAYMENT_NETWORK ?? "eip155:196";
 const ASSET = process.env.PAYMENT_ASSET ?? "";
@@ -58,53 +58,46 @@ export async function requirePayment(req: NextRequest): Promise<NextResponse | n
     return paymentChallenge(resourceUrl);
   }
 
-  // Decode client payload
-  let paymentPayload: unknown;
+  // Decode the buyer's signed PaymentPayload (base64 in the X-PAYMENT header).
+  let paymentPayload: FacilitatorPayload;
   try {
-    paymentPayload = JSON.parse(Buffer.from(paymentHeader, "base64").toString("utf-8"));
+    paymentPayload = JSON.parse(
+      Buffer.from(paymentHeader, "base64").toString("utf-8")
+    ) as FacilitatorPayload;
   } catch {
     return NextResponse.json({ error: "Invalid X-PAYMENT header." }, { status: 400 });
   }
 
-  const body = {
-    x402Version: 2,
-    paymentPayload,
-    paymentRequirements: requirements(),
-  };
+  const paymentRequirements = requirements() as FacilitatorRequirements;
 
-  // Verify — the Broker validates the signature; data.isValid true/false, reason in
-  // data.invalidReason / data.invalidMessage (surfaced so the buyer sees why).
-  const verify = await okxVerify(body);
-  // Log the full Broker verify response so a failed real-payment attempt leaves the
-  // exact invalidReason in the server logs (the buyer's 402 body only carries a summary).
-  console.log("[x402:verify]", JSON.stringify({ code: verify?.code, data: verify?.data }));
-  if (verify?.code !== "0" || !verify?.data?.isValid) {
+  // Verify — the SDK client posts to the Broker and returns the unwrapped result
+  // (isValid / invalidReason / invalidMessage). Reason is surfaced so the buyer sees why.
+  const verify = await okxVerify(paymentPayload, paymentRequirements);
+  console.log("[x402:verify]", JSON.stringify(verify));
+  if (!verify.isValid) {
     return NextResponse.json(
       {
         error: "Payment verification failed.",
-        reason: verify?.data?.invalidReason ?? verify?.msg ?? null,
-        message: verify?.data?.invalidMessage ?? null,
+        reason: verify.invalidReason ?? null,
+        message: verify.invalidMessage ?? null,
       },
       { status: 402 }
     );
   }
 
-  // Settle — syncSettle:true so we wait for on-chain confirmation before delivering the
-  // paid content. Per spec, a successful settle returns success:true with status
-  // success | pending | timeout; only status:"failed" (or success:false) is a real
-  // failure. A timeout means the tx was broadcast — treat it as paid and let the buyer
-  // poll /settle/status — rather than re-charging.
-  const settle = await okxSettle({ ...body, syncSettle: true });
-  console.log("[x402:settle]", JSON.stringify({ code: settle?.code, data: settle?.data }));
-  const s = settle?.data;
-  const settled = settle?.code === "0" && s?.success === true && s?.status !== "failed";
-  if (!settled) {
+  // Settle — the client is configured syncSettle:true, so it waits for on-chain
+  // confirmation. success:true with status success | pending | timeout all mean the
+  // payment went through (a timeout means the tx was broadcast); only success:false is a
+  // real failure, in which case we surface errorReason rather than silently re-charging.
+  const settle = await okxSettle(paymentPayload, paymentRequirements);
+  console.log("[x402:settle]", JSON.stringify(settle));
+  if (!settle.success) {
     return NextResponse.json(
       {
         error: "Payment settlement failed.",
-        reason: s?.errorReason ?? settle?.msg ?? null,
-        message: s?.errorMessage ?? null,
-        status: s?.status ?? null,
+        reason: settle.errorReason ?? null,
+        message: settle.errorMessage ?? null,
+        status: settle.status ?? null,
       },
       { status: 402 }
     );
