@@ -75,6 +75,9 @@ export async function requirePayment(req: NextRequest): Promise<NextResponse | n
   // Verify — the Broker validates the signature; data.isValid true/false, reason in
   // data.invalidReason / data.invalidMessage (surfaced so the buyer sees why).
   const verify = await okxVerify(body);
+  // Log the full Broker verify response so a failed real-payment attempt leaves the
+  // exact invalidReason in the server logs (the buyer's 402 body only carries a summary).
+  console.log("[x402:verify]", JSON.stringify({ code: verify?.code, data: verify?.data }));
   if (verify?.code !== "0" || !verify?.data?.isValid) {
     return NextResponse.json(
       {
@@ -92,6 +95,7 @@ export async function requirePayment(req: NextRequest): Promise<NextResponse | n
   // failure. A timeout means the tx was broadcast — treat it as paid and let the buyer
   // poll /settle/status — rather than re-charging.
   const settle = await okxSettle({ ...body, syncSettle: true });
+  console.log("[x402:settle]", JSON.stringify({ code: settle?.code, data: settle?.data }));
   const s = settle?.data;
   const settled = settle?.code === "0" && s?.success === true && s?.status !== "failed";
   if (!settled) {
