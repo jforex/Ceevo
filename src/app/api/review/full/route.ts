@@ -43,14 +43,18 @@ export async function GET(req: NextRequest) {
       { status: 405, headers: { Allow: "POST" } }
     );
   }
-  return paymentChallenge(req.nextUrl.href);
+  return paymentChallenge(req);
 }
 
 export async function POST(req: NextRequest) {
   const startedAt = Date.now();
   try {
+    // x402 gate. Either an immediate response (402 challenge or payment error), or a
+    // `settle` continuation to call AFTER the paid content is produced (the SDK model:
+    // verify signature -> run business logic -> settle on-chain -> deliver).
     const gate = await requirePayment(req);
-    if (gate) return gate;
+    if ("response" in gate) return gate.response;
+    const settle = gate.settle;
 
     // Accept multipart (browser), JSON (agent), or a raw-text body (the x402 replay,
     // which sends the task description with no file). See extractReviewInput.
@@ -79,6 +83,11 @@ export async function POST(req: NextRequest) {
       settleWithin(coverLetter(cvText, jobTitle, jobDescription, country, field, forbidden), remainingMs, ""),
       settleWithin<JobLeads | null>(recommendJobs(cvText, country, field), remainingMs, null),
     ]);
+
+    // Content is ready — settle the payment on-chain now. If settlement fails, return its
+    // error (402) rather than delivering unpaid content.
+    const settleError = await settle();
+    if (settleError) return settleError;
 
     return NextResponse.json({
       ok: true,

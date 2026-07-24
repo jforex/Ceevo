@@ -1,107 +1,135 @@
 import { NextRequest, NextResponse } from "next/server";
-import { okxVerify, okxSettle, type FacilitatorPayload, type FacilitatorRequirements } from "./okx";
+import { OKXFacilitatorClient } from "@okxweb3/x402-core";
+import {
+  x402ResourceServer,
+  x402HTTPResourceServer,
+  type HTTPAdapter,
+} from "@okxweb3/x402-core/server";
+import { ExactEvmScheme } from "@okxweb3/x402-evm/exact/server";
 
-const NETWORK = process.env.PAYMENT_NETWORK ?? "eip155:196";
-const ASSET = process.env.PAYMENT_ASSET ?? "";
+// The SDK types Network as a `${string}:${string}` CAIP-2 literal; our env value is a
+// plain string, so narrow it once here (validated at runtime by the SDK).
+type Network = `${string}:${string}`;
+
+// Full x402 handling via the official SDK. Previously we hand-built the 402 challenge
+// AND the /verify + /settle calls. The buyer's client is the SDK, which derives the
+// exact accepts entry (asset, atomic amount, EIP-712 domain) from `price` + `network`
+// via the facilitator's /supported endpoint. Our hand-built challenge used different
+// derived values, so the buyer signed over one shape and our paymentRequirements was
+// another → verify mismatch → endless 402. Driving the challenge AND verification from
+// the SAME SDK guarantees they match.
+
+const NETWORK = (process.env.PAYMENT_NETWORK ?? "eip155:196") as Network;
 const PAY_TO = process.env.PAYMENT_RECEIVER_ADDRESS ?? "";
-const AMOUNT = process.env.PAYMENT_AMOUNT ?? "10000";
-// EIP-712 domain fields for the token, verified against the token's on-chain
-// DOMAIN_SEPARATOR (name="USD₮0", version="1"). Buyer signs EIP-3009 against these.
-const TOKEN_NAME = process.env.PAYMENT_TOKEN_NAME ?? "USD₮0";
-const TOKEN_VERSION = process.env.PAYMENT_TOKEN_VERSION ?? "1";
+// USD price string (e.g. "$0.01"); the SDK converts it to the network's stablecoin.
+const PRICE = process.env.PAYMENT_PRICE ?? "$0.01";
+const ROUTE = "POST /api/review/full";
 
-// PaymentRequirements per the Broker spec (HTTP API — One-time Payment, exact/EIP-3009):
-// scheme, network, amount, asset, payTo, maxTimeoutSeconds, extra{name,version}.
-// This object is the source of truth used in THREE places that must be byte-identical:
-//   1. the accepts[] entry in the 402 challenge,
-//   2. the paymentRequirements sent to /verify,
-//   3. the paymentRequirements sent to /settle.
-// The Broker enforces that the buyer's signed `accepted` matches `paymentRequirements`
-// (param_mismatch / requirements_mismatch on any drift), so no extra, non-schema fields
-// may appear here. `decimals` and `resource` are NOT PaymentRequirements fields — an
-// earlier build added them and that is what made valid payments verify-fail and re-402.
-// `resource` belongs in PaymentPayload (added by the buyer's client), not here.
-function requirements() {
+const facilitator = new OKXFacilitatorClient({
+  apiKey: process.env.OKX_API_KEY ?? "",
+  secretKey: process.env.OKX_API_SECRET ?? "",
+  passphrase: process.env.OKX_API_PASSPHRASE ?? "",
+  baseUrl: process.env.OKX_PAYMENT_BASE_URL || undefined,
+  syncSettle: true, // wait for on-chain confirmation before delivering the paid content
+});
+
+// Built once per warm instance; initialize() fetches facilitator support (the /supported
+// call) so the challenge's accepts entry matches what the Broker expects.
+let httpServerPromise: Promise<x402HTTPResourceServer> | null = null;
+function getHttpServer(): Promise<x402HTTPResourceServer> {
+  if (!httpServerPromise) {
+    httpServerPromise = (async () => {
+      const resourceServer = new x402ResourceServer(facilitator);
+      resourceServer.register(NETWORK, new ExactEvmScheme());
+      const http = new x402HTTPResourceServer(resourceServer, {
+        [ROUTE]: {
+          accepts: [{ scheme: "exact", network: NETWORK, payTo: PAY_TO, price: PRICE }],
+          description: "CV Review and Rewrite",
+          mimeType: "application/json",
+        },
+      });
+      await http.initialize();
+      return http;
+    })().catch((e) => {
+      httpServerPromise = null; // allow retry on next request if init failed
+      throw e;
+    });
+  }
+  return httpServerPromise;
+}
+
+// Minimal HTTPAdapter over a Next.js request. The SDK only needs headers, method, path,
+// and url to process the payment (the CV body is read by the route itself afterward).
+function adapter(req: NextRequest): HTTPAdapter {
   return {
-    scheme: "exact",
-    network: NETWORK,
-    amount: AMOUNT,
-    asset: ASSET,
-    payTo: PAY_TO,
-    maxTimeoutSeconds: 60,
-    extra: { name: TOKEN_NAME, version: TOKEN_VERSION },
+    getHeader: (name: string) => req.headers.get(name) ?? undefined,
+    getMethod: () => req.method,
+    getPath: () => req.nextUrl.pathname,
+    getUrl: () => req.nextUrl.href,
+    getAcceptHeader: () => req.headers.get("accept") ?? "",
+    getUserAgent: () => req.headers.get("user-agent") ?? "",
   };
 }
 
-// The 402 Payment Required challenge: status 402 + the accepts array the client signs.
-// Method-agnostic, so the GET verification probe and an unpaid POST return the identical
-// challenge. `resource` is carried as a sibling of `accepts` (protocol-level metadata),
-// not inside the PaymentRequirements entry the buyer signs.
-export function paymentChallenge(resourceUrl: string): NextResponse {
-  return NextResponse.json(
-    {
-      x402Version: 2,
-      accepts: [requirements()],
-      resource: { url: resourceUrl },
-    },
-    { status: 402 }
-  );
+function toResponse(instr: { status: number; headers: Record<string, string>; body?: unknown }): NextResponse {
+  const body = typeof instr.body === "string" ? instr.body : JSON.stringify(instr.body ?? {});
+  return new NextResponse(body, { status: instr.status, headers: instr.headers });
 }
 
-// Returns null if paid+settled; otherwise a 402 NextResponse to return immediately.
-export async function requirePayment(req: NextRequest): Promise<NextResponse | null> {
-  const resourceUrl = req.nextUrl.href;
-  const paymentHeader = req.headers.get("x-payment");
+/**
+ * The bare 402 challenge for a GET verification probe (agent x402-check sends GET).
+ * Built by the SDK by running processHTTPRequest with no payment header.
+ */
+export async function paymentChallenge(req: NextRequest): Promise<NextResponse> {
+  const http = await getHttpServer();
+  const noPayment = { ...adapter(req), getHeader: (n: string) => (n.toLowerCase() === "x-payment" ? undefined : req.headers.get(n) ?? undefined) };
+  const result = await http.processHTTPRequest({
+    adapter: noPayment,
+    path: req.nextUrl.pathname,
+    method: "POST", // match the protected route pattern so the SDK emits its 402
+    routePattern: ROUTE,
+  });
+  if (result.type === "payment-error") return toResponse(result.response);
+  // Should not happen (route always requires payment); fall back to a generic 402.
+  return NextResponse.json({ x402Version: 2 }, { status: 402 });
+}
 
-  // No payment yet -> 402 with requirements
-  if (!paymentHeader) {
-    return paymentChallenge(resourceUrl);
+/**
+ * Runs the x402 gate. Returns:
+ *  - a NextResponse to return immediately (402 challenge, or a payment error), or
+ *  - a `settle` continuation: call it AFTER producing the paid content to settle on-chain;
+ *    it returns null on success (deliver) or a NextResponse on settlement failure.
+ */
+export async function requirePayment(
+  req: NextRequest
+): Promise<{ response: NextResponse } | { settle: () => Promise<NextResponse | null> }> {
+  const http = await getHttpServer();
+  const ctx = { adapter: adapter(req), path: req.nextUrl.pathname, method: req.method, routePattern: ROUTE };
+
+  const result = await http.processHTTPRequest(ctx);
+
+  if (result.type === "payment-error") {
+    return { response: toResponse(result.response) };
+  }
+  if (result.type === "no-payment-required") {
+    // Not expected for this route, but treat as free-pass rather than blocking.
+    return { settle: async () => null };
   }
 
-  // Decode the buyer's signed PaymentPayload (base64 in the X-PAYMENT header).
-  let paymentPayload: FacilitatorPayload;
-  try {
-    paymentPayload = JSON.parse(
-      Buffer.from(paymentHeader, "base64").toString("utf-8")
-    ) as FacilitatorPayload;
-  } catch {
-    return NextResponse.json({ error: "Invalid X-PAYMENT header." }, { status: 400 });
-  }
-
-  const paymentRequirements = requirements() as FacilitatorRequirements;
-
-  // Verify — the SDK client posts to the Broker and returns the unwrapped result
-  // (isValid / invalidReason / invalidMessage). Reason is surfaced so the buyer sees why.
-  const verify = await okxVerify(paymentPayload, paymentRequirements);
-  console.log("[x402:verify]", JSON.stringify(verify));
-  if (!verify.isValid) {
-    return NextResponse.json(
-      {
-        error: "Payment verification failed.",
-        reason: verify.invalidReason ?? null,
-        message: verify.invalidMessage ?? null,
-      },
-      { status: 402 }
-    );
-  }
-
-  // Settle — the client is configured syncSettle:true, so it waits for on-chain
-  // confirmation. success:true with status success | pending | timeout all mean the
-  // payment went through (a timeout means the tx was broadcast); only success:false is a
-  // real failure, in which case we surface errorReason rather than silently re-charging.
-  const settle = await okxSettle(paymentPayload, paymentRequirements);
-  console.log("[x402:settle]", JSON.stringify(settle));
-  if (!settle.success) {
-    return NextResponse.json(
-      {
-        error: "Payment settlement failed.",
-        reason: settle.errorReason ?? null,
-        message: settle.errorMessage ?? null,
-        status: settle.status ?? null,
-      },
-      { status: 402 }
-    );
-  }
-
-  return null; // paid + settled — proceed to deliver the review
+  // payment-verified — signature is valid. Settle after the content is produced.
+  const { paymentPayload, paymentRequirements, declaredExtensions } = result;
+  return {
+    settle: async () => {
+      const settle = await http.processSettlement(
+        paymentPayload,
+        paymentRequirements,
+        declaredExtensions
+      );
+      console.log("[x402:settle]", JSON.stringify({ success: settle.success, status: settle.status }));
+      if (!settle.success) {
+        return toResponse(settle.response);
+      }
+      return null; // settled — deliver
+    },
+  };
 }
