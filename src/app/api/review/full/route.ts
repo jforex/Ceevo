@@ -1,6 +1,6 @@
 import { requirePayment } from "@/lib/paywall";
 import { NextRequest, NextResponse } from "next/server";
-import { parseCV } from "@/lib/parseCV";
+import { extractReviewInput, ReviewInputError } from "@/lib/reviewInput";
 import { detectField } from "@/agent/detectField";
 import { scoreCV } from "@/agent/scoreCV";
 import { rewriteCV } from "@/agent/rewriteCV";
@@ -36,23 +36,10 @@ export async function POST(req: NextRequest) {
   try {
     const gate = await requirePayment(req);
     if (gate) return gate;
-    const form = await req.formData();
-    const file = form.get("cv") as File | null;
-    const jobTitle = (form.get("jobTitle") as string) ?? "";
-    const jobDescription = (form.get("jobDescription") as string) ?? "";
-    const country = (form.get("country") as string) ?? "US";
 
-    if (!file) return NextResponse.json({ error: "No CV file uploaded." }, { status: 400 });
-    if (!jobDescription.trim()) return NextResponse.json({ error: "Job description is required." }, { status: 400 });
-
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const cvText = await parseCV(buffer, file.name);
-    if (cvText.length < 50) {
-      return NextResponse.json(
-        { error: "Could not read enough text from that file. Try another format." },
-        { status: 422 }
-      );
-    }
+    // Accept multipart (browser), JSON (agent), or a raw-text body (the x402 replay,
+    // which sends the task description with no file). See extractReviewInput.
+    const { cvText, jobTitle, jobDescription, country } = await extractReviewInput(req);
 
     // Full pipeline: detect -> score -> plan, then rewrite/letter/leads in parallel.
     // The plan is grounded in the score and the rewrite follows the plan, so the first
@@ -79,6 +66,7 @@ export async function POST(req: NextRequest) {
     ]);
 
     return NextResponse.json({
+      ok: true,
       field,
       score,
       plan,
@@ -94,6 +82,10 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Something went wrong.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Bad/insufficient input is the caller's fault (422), not a server fault (500).
+    // Either way return an explicit { ok:false, error } body so a failed x402 replay
+    // shows the reason instead of a silent empty deliverable.
+    const status = err instanceof ReviewInputError ? 422 : 500;
+    return NextResponse.json({ ok: false, error: message }, { status });
   }
 }
