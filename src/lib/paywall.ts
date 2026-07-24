@@ -5,9 +5,23 @@ const NETWORK = process.env.PAYMENT_NETWORK ?? "eip155:196";
 const ASSET = process.env.PAYMENT_ASSET ?? "";
 const PAY_TO = process.env.PAYMENT_RECEIVER_ADDRESS ?? "";
 const AMOUNT = process.env.PAYMENT_AMOUNT ?? "10000";
+// EIP-712 domain fields for the token, verified against the token's on-chain
+// DOMAIN_SEPARATOR (name="USD₮0", version="1"). Buyer signs EIP-3009 against these.
+const TOKEN_NAME = process.env.PAYMENT_TOKEN_NAME ?? "USD₮0";
+const TOKEN_VERSION = process.env.PAYMENT_TOKEN_VERSION ?? "1";
 
-// Payment requirements the client must satisfy.
-function requirements(resourceUrl: string) {
+// PaymentRequirements per the Broker spec (HTTP API — One-time Payment, exact/EIP-3009):
+// scheme, network, amount, asset, payTo, maxTimeoutSeconds, extra{name,version}.
+// This object is the source of truth used in THREE places that must be byte-identical:
+//   1. the accepts[] entry in the 402 challenge,
+//   2. the paymentRequirements sent to /verify,
+//   3. the paymentRequirements sent to /settle.
+// The Broker enforces that the buyer's signed `accepted` matches `paymentRequirements`
+// (param_mismatch / requirements_mismatch on any drift), so no extra, non-schema fields
+// may appear here. `decimals` and `resource` are NOT PaymentRequirements fields — an
+// earlier build added them and that is what made valid payments verify-fail and re-402.
+// `resource` belongs in PaymentPayload (added by the buyer's client), not here.
+function requirements() {
   return {
     scheme: "exact",
     network: NETWORK,
@@ -15,20 +29,21 @@ function requirements(resourceUrl: string) {
     asset: ASSET,
     payTo: PAY_TO,
     maxTimeoutSeconds: 60,
-    // Verified on-chain via decimals() on 0x779d…3736 (X Layer): 6, symbol USD₮0.
-    // Supplied explicitly so the client/validator need not resolve it from a token list.
-    decimals: 6,
-    extra: { name: "USD₮0", version: "1" },
-    resource: resourceUrl,
+    extra: { name: TOKEN_NAME, version: TOKEN_VERSION },
   };
 }
 
 // The 402 Payment Required challenge: status 402 + the accepts array the client signs.
-// Method-agnostic (reads only the URL), so both the GET verification probe and an
-// unpaid POST return the identical challenge.
+// Method-agnostic, so the GET verification probe and an unpaid POST return the identical
+// challenge. `resource` is carried as a sibling of `accepts` (protocol-level metadata),
+// not inside the PaymentRequirements entry the buyer signs.
 export function paymentChallenge(resourceUrl: string): NextResponse {
   return NextResponse.json(
-    { x402Version: 2, accepts: [requirements(resourceUrl)] },
+    {
+      x402Version: 2,
+      accepts: [requirements()],
+      resource: { url: resourceUrl },
+    },
     { status: 402 }
   );
 }
@@ -54,26 +69,42 @@ export async function requirePayment(req: NextRequest): Promise<NextResponse | n
   const body = {
     x402Version: 2,
     paymentPayload,
-    paymentRequirements: requirements(resourceUrl),
+    paymentRequirements: requirements(),
   };
 
-  // Verify
+  // Verify — the Broker validates the signature; data.isValid true/false, reason in
+  // data.invalidReason / data.invalidMessage (surfaced so the buyer sees why).
   const verify = await okxVerify(body);
   if (verify?.code !== "0" || !verify?.data?.isValid) {
     return NextResponse.json(
-      { error: "Payment verification failed.", detail: verify?.data ?? verify },
+      {
+        error: "Payment verification failed.",
+        reason: verify?.data?.invalidReason ?? verify?.msg ?? null,
+        message: verify?.data?.invalidMessage ?? null,
+      },
       { status: 402 }
     );
   }
 
-  // Settle
-  const settle = await okxSettle(body);
-  if (settle?.code !== "0" || !settle?.data?.success) {
+  // Settle — syncSettle:true so we wait for on-chain confirmation before delivering the
+  // paid content. Per spec, a successful settle returns success:true with status
+  // success | pending | timeout; only status:"failed" (or success:false) is a real
+  // failure. A timeout means the tx was broadcast — treat it as paid and let the buyer
+  // poll /settle/status — rather than re-charging.
+  const settle = await okxSettle({ ...body, syncSettle: true });
+  const s = settle?.data;
+  const settled = settle?.code === "0" && s?.success === true && s?.status !== "failed";
+  if (!settled) {
     return NextResponse.json(
-      { error: "Payment settlement failed.", detail: settle?.data ?? settle },
+      {
+        error: "Payment settlement failed.",
+        reason: s?.errorReason ?? settle?.msg ?? null,
+        message: s?.errorMessage ?? null,
+        status: s?.status ?? null,
+      },
       { status: 402 }
     );
   }
 
-  return null; // paid — proceed
+  return null; // paid + settled — proceed to deliver the review
 }
