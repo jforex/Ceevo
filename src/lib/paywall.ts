@@ -20,6 +20,16 @@ function requirements(resourceUrl: string) {
   };
 }
 
+// The 402 Payment Required challenge: status 402 + the accepts array the client signs.
+// Method-agnostic (reads only the URL), so both the GET verification probe and an
+// unpaid POST return the identical challenge.
+export function paymentChallenge(resourceUrl: string): NextResponse {
+  return NextResponse.json(
+    { x402Version: 2, accepts: [requirements(resourceUrl)] },
+    { status: 402 }
+  );
+}
+
 // Returns null if paid+settled; otherwise a 402 NextResponse to return immediately.
 export async function requirePayment(req: NextRequest): Promise<NextResponse | null> {
   const resourceUrl = req.nextUrl.href;
@@ -27,10 +37,7 @@ export async function requirePayment(req: NextRequest): Promise<NextResponse | n
 
   // No payment yet -> 402 with requirements
   if (!paymentHeader) {
-    return NextResponse.json(
-      { x402Version: 2, accepts: [requirements(resourceUrl)] },
-      { status: 402 }
-    );
+    return paymentChallenge(resourceUrl);
   }
 
   // Decode client payload

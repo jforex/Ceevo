@@ -1,4 +1,4 @@
-import { requirePayment } from "@/lib/paywall";
+import { requirePayment, paymentChallenge } from "@/lib/paywall";
 import { NextRequest, NextResponse } from "next/server";
 import { extractReviewInput, ReviewInputError } from "@/lib/reviewInput";
 import { detectField } from "@/agent/detectField";
@@ -29,6 +29,21 @@ async function settleWithin<T>(p: Promise<T>, ms: number, fallback: T): Promise<
   } finally {
     clearTimeout(timer!);
   }
+}
+
+// The x402 verification probe (agent x402-check) sends a GET. Without a GET handler
+// Next returns 405, so the probe never sees the 402 challenge and the service reads as
+// invalid. GET returns the same 402 + accepts array as an unpaid POST. Payment itself
+// happens on the POST replay, so a GET carrying a payment header is told to use POST
+// rather than run the (body-dependent) review.
+export async function GET(req: NextRequest) {
+  if (req.headers.get("x-payment")) {
+    return NextResponse.json(
+      { ok: false, error: "Send the paid request as POST with the review body." },
+      { status: 405, headers: { Allow: "POST" } }
+    );
+  }
+  return paymentChallenge(req.nextUrl.href);
 }
 
 export async function POST(req: NextRequest) {
