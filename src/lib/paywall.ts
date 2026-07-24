@@ -15,6 +15,9 @@ function requirements(resourceUrl: string) {
     asset: ASSET,
     payTo: PAY_TO,
     maxTimeoutSeconds: 60,
+    // Verified on-chain via decimals() on 0x779d…3736 (X Layer): 6, symbol USD₮0.
+    // Supplied explicitly so the client/validator need not resolve it from a token list.
+    decimals: 6,
     extra: { name: "USD₮0", version: "1" },
     resource: resourceUrl,
   };
