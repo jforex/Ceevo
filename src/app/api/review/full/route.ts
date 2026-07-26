@@ -36,14 +36,43 @@ async function settleWithin<T>(p: Promise<T>, ms: number, fallback: T): Promise<
 // invalid. GET returns the same 402 + accepts array as an unpaid POST. Payment itself
 // happens on the POST replay, so a GET carrying a payment header is told to use POST
 // rather than run the (body-dependent) review.
+// Machine-readable description of the request body, so callers don't have to guess
+// field names. Advertised on the GET 402 challenge via the `X-Input-Schema` header
+// (the challenge body itself must stay the SDK-built x402 payload for agent x402-check).
+const INPUT_SCHEMA = {
+  contentTypes: ["multipart/form-data", "application/json", "text/plain"],
+  fields: {
+    cv: {
+      aliases: ["cv", "cvText", "resume"],
+      required: true,
+      description:
+        "The CV. A file (PDF/DOCX/TXT) under multipart; a string under JSON; or the raw request body under text/plain.",
+    },
+    jobDescription: {
+      aliases: ["jobDescription", "description", "task", "prompt"],
+      required: true,
+      description: "The target job description.",
+    },
+    jobTitle: { aliases: ["jobTitle", "title"], required: false, description: "The target job title." },
+    country: {
+      aliases: ["country"],
+      required: false,
+      default: "US",
+      description: "Two-letter target country code (US, UK, NG, …).",
+    },
+  },
+} as const;
+
 export async function GET(req: NextRequest) {
-  if (req.headers.get("x-payment")) {
+  if (req.headers.get("x-payment") || req.headers.get("payment-signature")) {
     return NextResponse.json(
       { ok: false, error: "Send the paid request as POST with the review body." },
       { status: 405, headers: { Allow: "POST" } }
     );
   }
-  return paymentChallenge(req);
+  const challenge = await paymentChallenge(req);
+  challenge.headers.set("X-Input-Schema", JSON.stringify(INPUT_SCHEMA));
+  return challenge;
 }
 
 export async function POST(req: NextRequest) {
@@ -110,6 +139,12 @@ export async function POST(req: NextRequest) {
     // Either way return an explicit { ok:false, error } body so a failed x402 replay
     // shows the reason instead of a silent empty deliverable.
     const status = err instanceof ReviewInputError ? 422 : 500;
-    return NextResponse.json({ ok: false, error: message }, { status });
+    // On an input error, return the schema so the caller learns the expected fields
+    // instead of guessing again.
+    const body =
+      err instanceof ReviewInputError
+        ? { ok: false, error: message, inputSchema: INPUT_SCHEMA }
+        : { ok: false, error: message };
+    return NextResponse.json(body, { status });
   }
 }
