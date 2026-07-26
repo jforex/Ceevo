@@ -70,9 +70,10 @@ export async function GET(req: NextRequest) {
       { status: 405, headers: { Allow: "POST" } }
     );
   }
-  const challenge = await paymentChallenge(req);
-  challenge.headers.set("X-Input-Schema", JSON.stringify(INPUT_SCHEMA));
-  return challenge;
+  // Return the SDK-built 402 challenge unchanged (agent x402-check depends on it).
+  // The input schema is surfaced in the 422 body when a paid caller sends the wrong
+  // fields — the place a caller actually needs it — rather than on this challenge.
+  return paymentChallenge(req);
 }
 
 export async function POST(req: NextRequest) {
