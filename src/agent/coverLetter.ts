@@ -28,6 +28,7 @@ export async function coverLetter(
     "You MAY: connect real CV experience to stated job requirements, and express straightforward professional interest in the role itself.",
     "Keep it to 3-4 short paragraphs. Open with the role, evidence the fit from the CV, close with a plain call to action.",
     "Use placeholders like [Hiring Manager] only where a real name is genuinely unknown.",
+    "MARKDOWN STRUCTURE: plain paragraphs only, no headings, no bullet lists — a cover letter is prose.",
     "Return the cover letter as clean Markdown only — no commentary, no preamble.",
   ].join(" ");
 

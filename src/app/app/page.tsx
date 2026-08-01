@@ -17,11 +17,15 @@ type BasicResult = {
   score: CVScore;
 };
 
+type ExportFile = { filename: string; mimeType: string; base64: string };
+type ExportPair = { pdf: ExportFile; docx: ExportFile };
+
 type FullResult = BasicResult & {
   plan: ChangePlan;
   rewritten: string;
   letter: string;
   jobs: JobLeads | null;
+  files?: { rewrittenCv: ExportPair | null; coverLetter: ExportPair | null };
   // Sections the server had to drop to stay inside the time budget.
   partial?: { rewritten: boolean; letter: boolean; jobs: boolean };
 };
@@ -345,7 +349,10 @@ export default function App() {
               <section style={card}>
                 <div style={sectionTag}>03 · Rewritten CV</div>
                 <pre style={pre}>{result.rewritten}</pre>
-                <CopyButton text={result.rewritten} label="Copy CV" />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  <CopyButton text={result.rewritten} label="Copy CV" />
+                  <DownloadButtons files={result.files?.rewrittenCv} />
+                </div>
               </section>
               )}
 
@@ -353,7 +360,10 @@ export default function App() {
               <section style={card}>
                 <div style={sectionTag}>04 · Cover letter</div>
                 <pre style={pre}>{result.letter}</pre>
-                <CopyButton text={result.letter} label="Copy letter" />
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  <CopyButton text={result.letter} label="Copy letter" />
+                  <DownloadButtons files={result.files?.coverLetter} />
+                </div>
               </section>
               )}
 
@@ -403,6 +413,29 @@ function KeywordRow({ label, items, color }: { label: string; items: string[]; c
           <span key={i} style={{ ...chip, borderColor: color, color }}>{k}</span>
         ))}
       </div>
+    </div>
+  );
+}
+
+function downloadBase64(file: ExportFile) {
+  const bytes = atob(file.base64);
+  const arr = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+  const blob = new Blob([arr], { type: file.mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = file.filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function DownloadButtons({ files }: { files: ExportPair | null | undefined }) {
+  if (!files) return null;
+  return (
+    <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+      <button onClick={() => downloadBase64(files.pdf)} style={pill}>Download PDF</button>
+      <button onClick={() => downloadBase64(files.docx)} style={pill}>Download DOCX</button>
     </div>
   );
 }

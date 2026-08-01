@@ -7,6 +7,8 @@ import { rewriteCV } from "@/agent/rewriteCV";
 import { changePlan } from "@/agent/changePlan";
 import { coverLetter } from "@/agent/coverLetter";
 import { recommendJobs, type JobLeads } from "@/agent/recommendJobs";
+import { markdownToDocx } from "@/lib/exportDocx";
+import { markdownToPdf } from "@/lib/exportPdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 60; // Vercel Hobby hard cap
@@ -14,6 +16,49 @@ export const maxDuration = 60; // Vercel Hobby hard cap
 // Leave headroom under maxDuration so we always answer ourselves rather than being
 // killed by the platform mid-request.
 const DEADLINE_MS = 52_000;
+
+type ExportFile = { filename: string; mimeType: string; base64: string };
+type ExportFiles = { rewrittenCv: { pdf: ExportFile; docx: ExportFile } | null; coverLetter: { pdf: ExportFile; docx: ExportFile } | null };
+
+/**
+ * Render the rewrite and cover letter into PDF + DOCX, base64-encoded for the JSON
+ * response. Each document's pair is generated in parallel; a failure on one document
+ * (e.g. a pathological Markdown construct) is logged and that document's `files` entry
+ * is simply omitted rather than failing content the buyer already paid for.
+ */
+async function buildExportFiles(input: {
+  rewritten: string;
+  letter: string;
+  country: string;
+}): Promise<ExportFiles> {
+  async function renderPair(md: string, baseName: string): Promise<{ pdf: ExportFile; docx: ExportFile } | null> {
+    if (!md) return null;
+    try {
+      const [pdfBuf, docxBuf] = await Promise.all([
+        markdownToPdf(md, input.country),
+        markdownToDocx(md, input.country),
+      ]);
+      return {
+        pdf: { filename: `${baseName}.pdf`, mimeType: "application/pdf", base64: pdfBuf.toString("base64") },
+        docx: {
+          filename: `${baseName}.docx`,
+          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          base64: docxBuf.toString("base64"),
+        },
+      };
+    } catch (err) {
+      console.error("[export] failed to render", baseName, err);
+      return null;
+    }
+  }
+
+  const [rewrittenCv, coverLetterFiles] = await Promise.all([
+    renderPair(input.rewritten, "CV"),
+    renderPair(input.letter, "Cover Letter"),
+  ]);
+
+  return { rewrittenCv, coverLetter: coverLetterFiles };
+}
 
 /**
  * Resolve to `fallback` if the promise misses the deadline or rejects, so one slow
@@ -119,6 +164,20 @@ export async function POST(req: NextRequest) {
     const settleError = await settle();
     if (settleError) return settleError;
 
+    // Render the rewrite and cover letter into downloadable PDF/DOCX, base64-encoded
+    // into the JSON body (the service is stateless — no file storage to link out to).
+    // Generated only for content that actually came back (not the "" timeout fallback),
+    // and per-file: a rendering failure must not cost the buyer the review they already
+    // paid for, so each export degrades to omitted rather than 500ing the whole response.
+    // Bounded separately from the AI budget — rendering is normally sub-second, but the
+    // payment has already settled by this point, so a stall here must still resolve
+    // before Vercel's hard 60s cap rather than costing the buyer a paid-for response.
+    const files = await settleWithin(
+      buildExportFiles({ rewritten, letter, country }),
+      Math.max(3_000, 55_000 - (Date.now() - startedAt)),
+      { rewrittenCv: null, coverLetter: null }
+    );
+
     return NextResponse.json({
       ok: true,
       field,
@@ -127,6 +186,7 @@ export async function POST(req: NextRequest) {
       rewritten,
       letter,
       jobs,
+      files,
       // Tells the client which optional sections to hide rather than render empty.
       partial: {
         rewritten: rewritten === "",

@@ -25,6 +25,7 @@ export async function rewriteCV(
     "- If the CV is missing something the job needs, leave it out — the scoring step already tells the user what is missing.",
     "You MAY: reorder, reword with stronger action verbs, improve formatting, and surface relevant existing experience.",
     "Tailor emphasis to the job and the conventions of this field, within the truthfulness rules above.",
+    "MARKDOWN STRUCTURE: use a level-1 heading (#) for the candidate's name, and level-2 headings (##) for each section label (e.g. Experience, Education, Skills) — never bold text alone as a section label. Use '-' bullet lists for line items.",
     "Return the rewritten CV as clean Markdown only — no commentary, no preamble.",
   ].join(" ");
 

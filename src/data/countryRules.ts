@@ -51,6 +51,30 @@ export const COUNTRY_RULES: Record<string, string> = {
   ].join(" "),
 };
 
+// Physical page layout for document export (PDF/DOCX). Page size follows local paper
+// stock convention; everything else (fonts, margins) stays constant across countries —
+// only the norms text above should drive content differences, not typography.
+export type PageSize = "LETTER" | "A4";
+
+export const COUNTRY_PAGE_SIZE: Record<string, PageSize> = {
+  US: "LETTER",
+  CA: "LETTER",
+  UK: "A4",
+  EU: "A4",
+  DE: "A4",
+  FR: "A4",
+  AU: "A4",
+  AE: "A4",
+  SG: "A4",
+  IN: "A4",
+  NG: "A4",
+  ZA: "A4",
+};
+
+export function pageSizeFor(country: string): PageSize {
+  return COUNTRY_PAGE_SIZE[country] ?? "A4";
+}
+
 export const COUNTRY_LABELS: Record<string, string> = {
   US: "United States",
   UK: "United Kingdom",
