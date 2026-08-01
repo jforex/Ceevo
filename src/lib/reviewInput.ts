@@ -75,24 +75,40 @@ export async function extractReviewInput(req: NextRequest): Promise<ReviewInput>
  * When no CV was supplied separately, use the task description as the CV text so the
  * pipeline has something to analyze. Guarantees a non-empty cvText or throws a clear,
  * catchable error the route turns into a structured non-2xx body.
+ *
+ * The CV-as-brief fallback below is ONLY valid for the raw-text x402-replay source,
+ * where there is genuinely one undifferentiated blob and no way to ask for a second
+ * field. For json/multipart callers that supplied a cv but omitted jobDescription,
+ * silently scoring the CV against itself produces a meaningless "perfect match" —
+ * that must be a clear 422 telling the caller what's missing, not a paid 200 with
+ * fabricated-looking output.
  */
 function finalize(input: ReviewInput): ReviewInput {
   const cvText = input.cvText.trim();
   const jd = input.jobDescription.trim();
 
+  if (input.source !== "text") {
+    if (cvText.length < MIN_CV_CHARS) {
+      throw new ReviewInputError(
+        `Not enough CV text to review (need at least ${MIN_CV_CHARS} characters). Provide a CV file or a "cvText"/"cv"/"resume" field.`
+      );
+    }
+    if (jd.length < MIN_CV_CHARS) {
+      throw new ReviewInputError(
+        `Job description is required (need at least ${MIN_CV_CHARS} characters). Provide a "jobDescription"/"description"/"task"/"prompt" field.`
+      );
+    }
+    return { ...input, cvText, jobDescription: jd };
+  }
+
+  // source === "text": one raw blob, no separate fields possible — reuse it as both.
   const effectiveCv = cvText || jd;
   if (effectiveCv.length < MIN_CV_CHARS) {
     throw new ReviewInputError(
       `Not enough text to review (need at least ${MIN_CV_CHARS} characters). Provide a CV file, a "cvText" field, or a task description in the request body.`
     );
   }
-
-  return {
-    ...input,
-    cvText: effectiveCv,
-    // If only a CV came in, reuse it as the brief so scoring still has a target.
-    jobDescription: jd || effectiveCv,
-  };
+  return { ...input, cvText: effectiveCv, jobDescription: jd || effectiveCv };
 }
 
 export class ReviewInputError extends Error {}
