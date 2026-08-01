@@ -101,9 +101,9 @@ const INPUT_SCHEMA = {
     jobTitle: { aliases: ["jobTitle", "title"], required: false, description: "The target job title." },
     country: {
       aliases: ["country"],
-      required: false,
-      default: "US",
-      description: "Two-letter target country code (US, UK, NG, …).",
+      required: true,
+      description:
+        "Two-letter target country code (US, UK, NG, …). Required — the rewrite is tailored to that country's CV/resume norms (e.g. US vs Nigeria formats genuinely differ), so this is never silently defaulted.",
     },
   },
 } as const;
@@ -133,7 +133,12 @@ export async function POST(req: NextRequest) {
 
     // Accept multipart (browser), JSON (agent), or a raw-text body (the x402 replay,
     // which sends the task description with no file). See extractReviewInput.
-    const { cvText, jobTitle, jobDescription, country } = await extractReviewInput(req);
+    // requireCountry: this endpoint rewrites the CV to a specific country's norms —
+    // that's the product's core promise — so a missing country must error, not
+    // silently default to US.
+    const { cvText, jobTitle, jobDescription, country } = await extractReviewInput(req, {
+      requireCountry: true,
+    });
 
     // Full pipeline: detect -> score -> plan, then rewrite/letter/leads in parallel.
     // The plan is grounded in the score and the rewrite follows the plan, so the first
